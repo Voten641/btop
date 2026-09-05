@@ -1380,6 +1380,21 @@ graph_symbol_proc = "default"
 #* Manually set which boxes to show. Available values are "cpu mem net proc" and "gpu0" through "gpu5", separate values with whitespace.
 shown_boxes = "cpu mem net proc"
 
+#* Optional custom layout for arranging the boxes set in shown_boxes into rows and columns,
+#* instead of the default fixed layout. Leave empty to use the default layout.
+#*
+#* Rows are separated by ";", boxes within a row by "+".
+#* Prefix a row with "<weight>|" to set its height relative to other rows (default 1).
+#* Suffix a box with ":<weight>" to set its width relative to others in the same row (default 1).
+#* Must contain exactly the boxes listed in shown_boxes (in any order/grouping), otherwise
+#* the default layout is used.
+#*
+#* Example: "cpu+gpu0;mem+net;proc" puts cpu and gpu0 side by side on the top row,
+#* mem and net side by side below that, and proc spanning the bottom row.
+#* Example: "2|cpu+gpu0:2+gpu1:1;1|mem+net;1|proc" additionally makes the top row twice
+#* as tall as the other two, and gpu0 twice as wide as gpu1.
+boxes_layout = ""
+
 #* Update time in milliseconds, recommended 2000 ms or above for better sample times for graphs.
 update_ms = 2000
 
@@ -1446,9 +1461,6 @@ cpu_single_graph = false
 
 #* Show cpu box at bottom of screen instead of top.
 cpu_bottom = false
-
-#* Show gpu box(es) beside the cpu box instead of below it, splitting the top row horizontally.
-gpu_cpu_side_by_side = false
 
 #* Shows the system uptime in the CPU box.
 show_uptime = true

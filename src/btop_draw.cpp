@@ -545,9 +545,6 @@ namespace Draw {
 namespace Cpu {
 	int width_p = 100, height_p = 32;
 	int min_width = 60, min_height = 8;
-	//? Width percentage given to the cpu box when sharing its row with the gpu box(es)
-	//? (see the "gpu_cpu_side_by_side" config option), the remainder goes to the gpu box(es)
-	int cpu_gpu_split_width_p = 50;
 	int x = 1, y = 1, width = 20, height;
 	int b_columns, b_column_size;
 	int b_x, b_y, b_width, b_height;
@@ -2301,15 +2298,23 @@ namespace Draw {
 			using namespace Gpu;
 			total_height += 4 + gpu_b_height_offsets[shown_panels[i]];
 		}
-
-		//? If enabled, place the gpu box(es) beside the cpu box (sharing the same row)
-		//? instead of stacking them below/above it.
-		const bool gpu_cpu_side_by_side = Cpu::shown and Gpu::shown != 0
-			and Config::getB("gpu_cpu_side_by_side");
 	#endif
 		Mem::shown = boxes.contains("mem");
 		Net::shown = boxes.contains("net");
 		Proc::shown = boxes.contains("proc");
+
+		//? Optional custom arrangement of the boxes into rows/columns (see the "boxes_layout" config
+		//? option). Falls back to the classic fixed layout below if unset, invalid, or if it doesn't
+		//? reference exactly the boxes currently in shown_boxes.
+		std::unordered_map<string, array<int, 4>> custom_layout;
+		bool custom_layout_active = false;
+		if (const auto& layout_str = Config::getS("boxes_layout"); not layout_str.empty()) {
+			vector<Tools::LayoutRow> layout_rows;
+			if (Tools::parseBoxesLayout(layout_str, layout_rows) and Tools::boxesLayoutMatches(layout_rows, boxes)) {
+				custom_layout = Tools::solveBoxesLayout(layout_rows, Term::width, Term::height);
+				custom_layout_active = true;
+			}
+		}
 
 		//* Calculate and draw cpu box outlines
 		if (Cpu::shown) {
@@ -2322,27 +2327,24 @@ namespace Draw {
 				: 0;
 		#endif
             const bool show_temp = (Config::getB("check_temp") and got_sensors);
-		#ifdef GPU_SUPPORT
-			if (gpu_cpu_side_by_side) {
-				//? Cpu box only takes half the width, the other half goes to the gpu box(es)
-				width = round((double)Term::width * cpu_gpu_split_width_p / 100);
-				height = max(8, (int)ceil((double)Term::height * (not (Mem::shown or Net::shown or Proc::shown) ? 100 : height_p) / 100));
-				if (height <= Term::height-gpus_extra_height) height += gpus_extra_height;
-			} else if (Gpu::shown != 0 and not (Mem::shown or Net::shown or Proc::shown)) {
-				width = round((double)Term::width * width_p / 100);
-				height = Term::height - Gpu::total_height - gpus_extra_height;
-				if (height <= Term::height-gpus_extra_height) height += gpus_extra_height;
+			if (custom_layout_active) {
+				const auto& r = custom_layout.at("cpu");
+				x = r[0]; y = r[1]; width = r[2]; height = r[3];
 			} else {
-				width = round((double)Term::width * width_p / 100);
-				height = max(8, (int)ceil((double)Term::height * (trim(boxes) == "cpu" ? 100 : height_p/(Gpu::shown+1) + (Gpu::shown != 0)*5) / 100));
+			#ifdef GPU_SUPPORT
+				if (Gpu::shown != 0 and not (Mem::shown or Net::shown or Proc::shown)) {
+					height = Term::height - Gpu::total_height - gpus_extra_height;
+				} else {
+					height = max(8, (int)ceil((double)Term::height * (trim(boxes) == "cpu" ? 100 : height_p/(Gpu::shown+1) + (Gpu::shown != 0)*5) / 100));
+				}
 				if (height <= Term::height-gpus_extra_height) height += gpus_extra_height;
+			#else
+				height = max(8, (int)ceil((double)Term::height * (trim(boxes) == "cpu" ? 100 : height_p) / 100));
+			#endif
+				width = round((double)Term::width * width_p / 100);
+				x = 1;
+				y = cpu_bottom ? Term::height - height + 1 : 1;
 			}
-		#else
-			width = round((double)Term::width * width_p / 100);
-			height = max(8, (int)ceil((double)Term::height * (trim(boxes) == "cpu" ? 100 : height_p) / 100));
-		#endif
-			x = 1;
-			y = cpu_bottom ? Term::height - height + 1 : 1;
 
 		#ifdef GPU_SUPPORT
 			b_columns = max(2, (int)ceil((double)(Shared::coreCount + 1) / (height - gpus_extra_height - 5)));
@@ -2411,25 +2413,28 @@ namespace Draw {
 			for (auto i = 0; i < shown; ++i) {
 				redraw[i] = true;
 				int height = 0;
-				width = gpu_cpu_side_by_side ? (int)Term::width - Cpu::width : (int)Term::width;
-				if (gpu_cpu_side_by_side)
-					height = Cpu::height / shown + (i == 0) * (Cpu::height % shown);
-				else if (Cpu::shown)
-					if (not (Mem::shown or Net::shown or Proc::shown))
-						height = min_height;
-					else height = Cpu::height;
-				else
-					if (not (Mem::shown or Net::shown or Proc::shown))
-						height = (Term::height - total_height) / (Gpu::shown - i) + (i == 0) * ((Term::height - total_height) % (Gpu::shown - i));
+				if (custom_layout_active) {
+					const auto& r = custom_layout.at(std::string("gpu") + (char)(shown_panels[i]+'0'));
+					x_vec[i] = r[0]; y_vec[i] = r[1]; width = r[2]; height = r[3];
+					b_height_vec[i] = gpu_b_height_offsets[shown_panels[i]] + 2;
+					height = max(height, b_height_vec[i] + 2);
+				} else {
+					width = Term::width;
+					if (Cpu::shown)
+						if (not (Mem::shown or Net::shown or Proc::shown))
+							height = min_height;
+						else height = Cpu::height;
 					else
-						height = max(min_height, (int)ceil((double)Term::height * height_p/Gpu::shown / 100));
+						if (not (Mem::shown or Net::shown or Proc::shown))
+							height = (Term::height - total_height) / (Gpu::shown - i) + (i == 0) * ((Term::height - total_height) % (Gpu::shown - i));
+						else
+							height = max(min_height, (int)ceil((double)Term::height * height_p/Gpu::shown / 100));
 
-				b_height_vec[i] = gpu_b_height_offsets[shown_panels[i]] + 2;
-				if (not gpu_cpu_side_by_side) height += (height+Cpu::height == Term::height-1);
-				height = max(height, b_height_vec[i] + 2);
-				x_vec[i] = gpu_cpu_side_by_side ? Cpu::x + Cpu::width : 1;
-				y_vec[i] = (gpu_cpu_side_by_side ? Cpu::y : 1) + total_height
-					+ (not gpu_cpu_side_by_side and not Config::getB("cpu_bottom"))*Cpu::shown*Cpu::height;
+					b_height_vec[i] = gpu_b_height_offsets[shown_panels[i]] + 2;
+					height += (height+Cpu::height == Term::height-1);
+					height = max(height, b_height_vec[i] + 2);
+					x_vec[i] = 1; y_vec[i] = 1 + total_height + (not Config::getB("cpu_bottom"))*Cpu::shown*Cpu::height;
+				}
 				box[i] = createBox(x_vec[i], y_vec[i], width, height, Theme::c("cpu_box"), true, std::string("gpu") + (char)(shown_panels[i]+'0'), "", (shown_panels[i]+5)%10); // TODO gpu_box
 				b_width = clamp(width/2, min_width, 65);
 				total_height += height;
@@ -2444,10 +2449,6 @@ namespace Draw {
 				box[i] += createBox(b_x_vec[i], b_y_vec[i], b_width, b_height_vec[i], "", false, name.substr(0, b_width-5));
 				b_height_vec[i] = height - 2;
 			}
-
-			//? When placed beside the cpu box, the gpu column doesn't add to the
-			//? vertical space used below (mem/net/proc), only Cpu::height does.
-			if (gpu_cpu_side_by_side) total_height = 0;
 		}
 	#endif
 
@@ -2458,23 +2459,28 @@ namespace Draw {
 			auto swap_disk = Config::getB("swap_disk");
 			auto mem_graphs = Config::getB("mem_graphs");
 
-			width = round((double)Term::width * (Proc::shown ? width_p : 100) / 100);
-		#ifdef GPU_SUPPORT
-			height = floor(static_cast<double>(Term::height) * (100 - Net::height_p * Net::shown*4 / ((Gpu::shown != 0 and Cpu::shown and not gpu_cpu_side_by_side) + 4)) / 100) - Cpu::height - Gpu::total_height;
-		#else
-			height = floor(static_cast<double>(Term::height) * (100 - Cpu::height_p * Cpu::shown - Net::height_p * Net::shown) / 100);
-		#endif
-			x = (proc_left and Proc::shown) ? Term::width - width + 1: 1;
-			if (mem_below_net and Net::shown)
-		#ifdef GPU_SUPPORT
-				y = Term::height - height + 1 - (cpu_bottom ? Cpu::height : 0);
-			else
-				y = (cpu_bottom ? 1 : Cpu::height + 1) + Gpu::total_height;
-		#else
-				y = Term::height - height + 1 - (cpu_bottom ? Cpu::height : 0);
-			else
-				y = cpu_bottom ? 1 : Cpu::height + 1;
-		#endif
+			if (custom_layout_active) {
+				const auto& r = custom_layout.at("mem");
+				x = r[0]; y = r[1]; width = r[2]; height = r[3];
+			} else {
+				width = round((double)Term::width * (Proc::shown ? width_p : 100) / 100);
+			#ifdef GPU_SUPPORT
+				height = floor(static_cast<double>(Term::height) * (100 - Net::height_p * Net::shown*4 / ((Gpu::shown != 0 and Cpu::shown) + 4)) / 100) - Cpu::height - Gpu::total_height;
+			#else
+				height = floor(static_cast<double>(Term::height) * (100 - Cpu::height_p * Cpu::shown - Net::height_p * Net::shown) / 100);
+			#endif
+				x = (proc_left and Proc::shown) ? Term::width - width + 1: 1;
+				if (mem_below_net and Net::shown)
+			#ifdef GPU_SUPPORT
+					y = Term::height - height + 1 - (cpu_bottom ? Cpu::height : 0);
+				else
+					y = (cpu_bottom ? 1 : Cpu::height + 1) + Gpu::total_height;
+			#else
+					y = Term::height - height + 1 - (cpu_bottom ? Cpu::height : 0);
+				else
+					y = cpu_bottom ? 1 : Cpu::height + 1;
+			#endif
+			}
 
 			if (show_disks) {
 				mem_width = ceil((double)(width - 3) / 2);
@@ -2522,21 +2528,26 @@ namespace Draw {
 		//* Calculate and draw net box outlines
 		if (Net::shown) {
 			using namespace Net;
-			width = round((double)Term::width * (Proc::shown ? width_p : 100) / 100);
-		#ifdef GPU_SUPPORT
-			height = Term::height - Cpu::height - Gpu::total_height - Mem::height;
-		#else
-			height = Term::height - Cpu::height - Mem::height;
-		#endif
-			x = (proc_left and Proc::shown) ? Term::width - width + 1 : 1;
-			if (mem_below_net and Mem::shown)
+			if (custom_layout_active) {
+				const auto& r = custom_layout.at("net");
+				x = r[0]; y = r[1]; width = r[2]; height = r[3];
+			} else {
+				width = round((double)Term::width * (Proc::shown ? width_p : 100) / 100);
 			#ifdef GPU_SUPPORT
-				y = (cpu_bottom ? 1 : Cpu::height + 1) + Gpu::total_height;
+				height = Term::height - Cpu::height - Gpu::total_height - Mem::height;
 			#else
-				y = cpu_bottom ? 1 : Cpu::height + 1;
+				height = Term::height - Cpu::height - Mem::height;
 			#endif
-			else
-				y = Term::height - height + 1 - (cpu_bottom ? Cpu::height : 0);
+				x = (proc_left and Proc::shown) ? Term::width - width + 1 : 1;
+				if (mem_below_net and Mem::shown)
+				#ifdef GPU_SUPPORT
+					y = (cpu_bottom ? 1 : Cpu::height + 1) + Gpu::total_height;
+				#else
+					y = cpu_bottom ? 1 : Cpu::height + 1;
+				#endif
+				else
+					y = Term::height - height + 1 - (cpu_bottom ? Cpu::height : 0);
+			}
 
 			b_width = (width > 45) ? 27 : 19;
 			b_height = (height > 10) ? 9 : height - 2;
@@ -2556,18 +2567,23 @@ namespace Draw {
 		//* Calculate and draw proc box outlines
 		if (Proc::shown) {
 			using namespace Proc;
-			width = Term::width - (Mem::shown ? Mem::width : (Net::shown ? Net::width : 0));
-		#ifdef GPU_SUPPORT
-			height = Term::height - Cpu::height - Gpu::total_height;
-		#else
-			height = Term::height - Cpu::height;
-		#endif
-			x = proc_left ? 1 : Term::width - width + 1;
-		#ifdef GPU_SUPPORT
-			y = ((cpu_bottom and Cpu::shown) ? 1 : Cpu::height + 1) + Gpu::total_height;
-		#else
-			y = (cpu_bottom and Cpu::shown) ? 1 : Cpu::height + 1;
-		#endif
+			if (custom_layout_active) {
+				const auto& r = custom_layout.at("proc");
+				x = r[0]; y = r[1]; width = r[2]; height = r[3];
+			} else {
+				width = Term::width - (Mem::shown ? Mem::width : (Net::shown ? Net::width : 0));
+			#ifdef GPU_SUPPORT
+				height = Term::height - Cpu::height - Gpu::total_height;
+			#else
+				height = Term::height - Cpu::height;
+			#endif
+				x = proc_left ? 1 : Term::width - width + 1;
+			#ifdef GPU_SUPPORT
+				y = ((cpu_bottom and Cpu::shown) ? 1 : Cpu::height + 1) + Gpu::total_height;
+			#else
+				y = (cpu_bottom and Cpu::shown) ? 1 : Cpu::height + 1;
+			#endif
+			}
 			select_max = height - 3;
 			box = createBox(x, y, width, height, Theme::c("proc_box"), true, "proc", "", 4);
 		}

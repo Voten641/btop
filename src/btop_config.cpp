@@ -120,6 +120,20 @@ namespace Config {
 
 		{"shown_boxes", 		"#* Manually set which boxes to show. Available values are \"cpu mem net proc\" and \"gpu0\" through \"gpu5\", separate values with whitespace."},
 
+		{"boxes_layout",		"#* Optional custom layout for arranging the boxes set in shown_boxes into rows and columns,\n"
+								"#* instead of the default fixed layout. Leave empty to use the default layout.\n"
+								"#*\n"
+								"#* Rows are separated by \";\", boxes within a row by \"+\".\n"
+								"#* Prefix a row with \"<weight>|\" to set its height relative to other rows (default 1).\n"
+								"#* Suffix a box with \":<weight>\" to set its width relative to others in the same row (default 1).\n"
+								"#* Must contain exactly the boxes listed in shown_boxes (in any order/grouping), otherwise\n"
+								"#* the default layout is used.\n"
+								"#*\n"
+								"#* Example: \"cpu+gpu0;mem+net;proc\" puts cpu and gpu0 side by side on the top row,\n"
+								"#* mem and net side by side below that, and proc spanning the bottom row.\n"
+								"#* Example: \"2|cpu+gpu0:2+gpu1:1;1|mem+net;1|proc\" additionally makes the top row twice\n"
+								"#* as tall as the other two, and gpu0 twice as wide as gpu1."},
+
 		{"update_ms", 			"#* Update time in milliseconds, recommended 2000 ms or above for better sample times for graphs."},
 
 		{"proc_sorting",		"#* Processes sorting, \"pid\" \"program\" \"arguments\" \"threads\" \"user\" \"memory\" \"cpu lazy\" \"cpu direct\",\n"
@@ -167,10 +181,6 @@ namespace Config {
 		{"cpu_single_graph", 	"#* Set to True to completely disable the lower CPU graph."},
 
 		{"cpu_bottom",			"#* Show cpu box at bottom of screen instead of top."},
-
-	#ifdef GPU_SUPPORT
-		{"gpu_cpu_side_by_side", "#* Show gpu box(es) beside the cpu box instead of below it, splitting the top row horizontally."},
-	#endif
 
 		{"show_uptime", 		"#* Shows the system uptime in the CPU box."},
 
@@ -277,6 +287,7 @@ namespace Config {
 	std::unordered_map<std::string_view, string> strings = {
 		{"color_theme", "Default"},
 		{"shown_boxes", "cpu mem net proc"},
+		{"boxes_layout", ""},
 		{"graph_symbol", "braille"},
 		{"disable_presets", "Off"},
 		{"presets", "cpu:1:default,proc:0:default cpu:0:default,mem:0:default,net:0:default cpu:0:block,net:0:tty"},
@@ -335,9 +346,6 @@ namespace Config {
 		{"cpu_invert_lower", true},
 		{"cpu_single_graph", false},
 		{"cpu_bottom", false},
-	#ifdef GPU_SUPPORT
-		{"gpu_cpu_side_by_side", false},
-	#endif
 		{"show_uptime", true},
 		{"show_cpu_watts", true},
 		{"check_temp", true},
@@ -621,6 +629,15 @@ namespace Config {
 				validError = "Terminal too small to display entered boxes!";
 			else if (not set_boxes(value))
 				validError = "Invalid box name(s) in shown_boxes!";
+			else
+				return true;
+		}
+
+		else if (name == "boxes_layout" and not value.empty()) {
+			vector<Tools::LayoutRow> rows;
+			string error;
+			if (not Tools::parseBoxesLayout(value, rows, &error))
+				validError = error;
 			else
 				return true;
 		}

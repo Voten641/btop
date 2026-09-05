@@ -427,6 +427,38 @@ namespace Tools {
 
 	//* Convert a celsius value to celsius, fahrenheit, kelvin or rankin and return tuple with new value and unit.
 	auto celsius_to(const long long& celsius, const string& scale) -> tuple<long long, string>;
+
+	//? ------------------------------------------------- CUSTOM BOX LAYOUT -------------------------------------------
+
+	//* A single box placed in a layout row, with its relative width weight
+	struct LayoutBox {
+		string name;
+		int weight;
+	};
+
+	//* A row of boxes placed side by side, with the row's relative height weight
+	struct LayoutRow {
+		int weight;
+		vector<LayoutBox> boxes;
+	};
+
+	//* Parse the "boxes_layout" config value into rows of boxes.
+	//* Syntax: rows are separated by ";", boxes within a row by "+".
+	//* A row may be prefixed with "<weight>|" to set its height weight relative to other rows (default 1).
+	//* A box may be suffixed with ":<weight>" to set its width weight relative to others in the same row (default 1).
+	//* Returns false (with a description in <error> when non-null) on any syntax error, unknown box name,
+	//* duplicate box, or if the parsed layout doesn't reference each valid box name at most once.
+	//* Does NOT check that the layout matches the currently shown boxes, see boxesLayoutMatches().
+	bool parseBoxesLayout(const string& layout, vector<LayoutRow>& rows, string* error = nullptr);
+
+	//* Check that a parsed layout (from parseBoxesLayout()) references exactly the boxes listed in
+	//* <shown_boxes> (the "shown_boxes" config value), no more and no less.
+	bool boxesLayoutMatches(const vector<LayoutRow>& rows, const string& shown_boxes);
+
+	//* Solve on-screen x/y/width/height for every box named in <rows>, filling a <term_width> x <term_height> area
+	//* (1-indexed, matching the rest of btop's box coordinates). Row heights and, within each row, box widths are
+	//* distributed proportionally to their weights.
+	auto solveBoxesLayout(const vector<LayoutRow>& rows, int term_width, int term_height) -> std::unordered_map<string, array<int, 4>>;
 }
 
 namespace Tools {

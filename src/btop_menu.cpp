@@ -303,6 +303,27 @@ namespace Menu {
 				"Separate values with whitespace.",
 				"",
 				"Toggle between presets with key \"p\"."},
+			{"boxes_layout",
+				"Custom layout for arranging boxes.",
+				"",
+				"Arrange the boxes set in shown_boxes into",
+				"rows and columns instead of the default",
+				"layout. Leave empty to use the default.",
+				"",
+				"Rows separated by \";\", boxes within a row",
+				"by \"+\".",
+				"",
+				"Prefix a row with \"<weight>|\" to set its",
+				"height relative to other rows (default 1).",
+				"Suffix a box with \":<weight>\" to set its",
+				"width relative to others in its row",
+				"(default 1).",
+				"",
+				"Must contain exactly the boxes listed in",
+				"shown_boxes, otherwise the default layout",
+				"is used.",
+				"",
+				"Example: \"cpu+gpu0;mem+net;proc\""},
 			{"update_ms",
 				"Update time in milliseconds.",
 				"",
@@ -415,16 +436,6 @@ namespace Menu {
 				"",
 				"Show cpu box at bottom of screen instead",
 				"of top."},
-		#ifdef GPU_SUPPORT
-			{"gpu_cpu_side_by_side",
-				"Show gpu box(es) beside cpu box.",
-				"",
-				"Splits the top row horizontally, placing",
-				"the gpu box(es) to the right of the cpu",
-				"box instead of below it.",
-				"",
-				"True or False."},
-		#endif
 			{"graph_symbol_cpu",
 				"Graph symbol to use for graphs in cpu box.",
 				"",
@@ -1398,7 +1409,7 @@ static int optionsMenu(const string& key) {
 					Config::set(option, editor.text);
 					if (option == "custom_cpu_name" or option.starts_with("custom_gpu_name"))
 						screen_redraw = true;
-					else if (is_in(option, "shown_boxes", "presets")) {
+					else if (is_in(option, "shown_boxes", "boxes_layout", "presets")) {
 						screen_redraw = true;
 						atomic_wait(Runner::active);
 						Config::current_preset.reset();

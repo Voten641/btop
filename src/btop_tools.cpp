@@ -22,6 +22,7 @@ tab-size = 4
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <string_view>
 #include <utility>
@@ -116,7 +117,46 @@ namespace Term {
 		return false;
 	}
 
+	//* Compute the min size for a custom "boxes_layout" arrangement (see Tools::parseBoxesLayout()),
+	//* returns an empty optional if "boxes_layout" is unset, invalid, or doesn't match <boxes>.
+	std::optional<array<int, 2>> get_min_size_custom_layout(const string& boxes) {
+		const auto& custom_layout = Config::getS("boxes_layout");
+		if (custom_layout.empty()) return std::nullopt;
+
+		vector<Tools::LayoutRow> rows;
+		if (not Tools::parseBoxesLayout(custom_layout, rows) or not Tools::boxesLayoutMatches(rows, boxes))
+			return std::nullopt;
+
+		int total_width = 0, total_height = 0;
+		for (const auto& row : rows) {
+			int row_width = 0, row_height = 0;
+			for (const auto& box : row.boxes) {
+				int w = 0, h = 0;
+				if (box.name == "cpu") { w = Cpu::min_width; h = Cpu::min_height; }
+				else if (box.name == "mem") { w = Mem::min_width; h = Mem::min_height; }
+				else if (box.name == "net") { w = Mem::min_width; h = Net::min_height; }
+				else if (box.name == "proc") { w = Proc::min_width; h = Proc::min_height; }
+			#ifdef GPU_SUPPORT
+				else if (box.name.starts_with("gpu")) {
+					const int idx = box.name.back() - '0';
+					w = Gpu::min_width;
+					h = 4 + (idx >= 0 and idx < (int)Gpu::gpu_b_height_offsets.size() ? Gpu::gpu_b_height_offsets[idx] : 0);
+				}
+			#endif
+				row_width += w;
+				row_height = max(row_height, h);
+			}
+			total_width = max(total_width, row_width);
+			total_height += row_height;
+		}
+
+		return array<int, 2>{ total_width, total_height };
+	}
+
 	auto get_min_size(const string& boxes) -> array<int, 2> {
+		if (auto custom = get_min_size_custom_layout(boxes); custom.has_value())
+			return custom.value();
+
         bool cpu = boxes.find("cpu") != string::npos;
         bool mem = boxes.find("mem") != string::npos;
         bool net = boxes.find("net") != string::npos;
@@ -127,42 +167,21 @@ namespace Term {
         	for (char i = '0'; i <= '5'; i++)
         		gpu += (boxes.contains("gpu"s + i) ? 1 : 0);
 	#endif
-    #ifdef GPU_SUPPORT
-		bool side_by_side = cpu and gpu != 0 and Config::getB("gpu_cpu_side_by_side");
-	#endif
         int width = 0;
 		if (mem) width = Mem::min_width;
 		else if (net) width = Mem::min_width;
 		width += (proc ? Proc::min_width : 0);
-	#ifdef GPU_SUPPORT
-		if (side_by_side) {
-			//? Cpu and gpu box(es) sit next to each other, so their minimum widths add up
-			int cpu_gpu_width = Cpu::min_width + Gpu::min_width;
-			if (width < cpu_gpu_width) width = cpu_gpu_width;
-		} else {
-			if (cpu and width < Cpu::min_width) width = Cpu::min_width;
-			if (gpu != 0 and width < Gpu::min_width) width = Gpu::min_width;
-		}
-	#else
 		if (cpu and width < Cpu::min_width) width = Cpu::min_width;
+	#ifdef GPU_SUPPORT
+		if (gpu != 0 and width < Gpu::min_width) width = Gpu::min_width;
 	#endif
 
 		int height = (cpu ? Cpu::min_height : 0);
 		if (proc) height += Proc::min_height;
 		else height += (mem ? Mem::min_height : 0) + (net ? Net::min_height : 0);
 	#ifdef GPU_SUPPORT
-		if (side_by_side) {
-			//? Cpu and gpu box(es) share the same row, so only the taller of the two
-			//? adds to the total height instead of stacking on top of each other
-			int gpu_col_height = 0;
-			for (int i = 0; i < gpu; i++)
-				gpu_col_height += Gpu::gpu_b_height_offsets[i] + 4;
-			if (gpu_col_height > Cpu::min_height)
-				height += gpu_col_height - Cpu::min_height;
-		} else {
-			for (int i = 0; i < gpu; i++)
-				height += Gpu::gpu_b_height_offsets[i] + 4;
-		}
+		for (int i = 0; i < gpu; i++)
+			height += Gpu::gpu_b_height_offsets[i] + 4;
 	#endif
 
 		return { width, height };
@@ -749,6 +768,127 @@ namespace Tools {
 
 	bool DebugTimer::is_running() {
 		return running;
+	}
+
+	//? --------------------------------------------- CUSTOM BOX LAYOUT ---------------------------------------------
+
+	bool parseBoxesLayout(const string& layout, vector<LayoutRow>& rows, string* error) {
+		rows.clear();
+		auto fail = [&](const string& msg) {
+			if (error != nullptr) *error = msg;
+			rows.clear();
+			return false;
+		};
+
+		vector<string> seen_names;
+		for (const auto& row_str_raw : ssplit(layout, ';')) {
+			string row_str { trim(row_str_raw) };
+			if (row_str.empty()) continue;
+
+			int row_weight = 1;
+			string boxes_str = row_str;
+			if (auto bar = row_str.find('|'); bar != string::npos) {
+				string weight_str { trim(row_str.substr(0, bar)) };
+				boxes_str = string(trim(row_str.substr(bar + 1)));
+				if (weight_str.empty() or not isint(weight_str))
+					return fail(R"(Invalid row weight in boxes_layout: ")" + row_str + '"');
+				row_weight = std::stoi(weight_str);
+				if (row_weight < 1)
+					return fail(R"(Row weight must be a positive integer in boxes_layout: ")" + row_str + '"');
+			}
+
+			LayoutRow row{ row_weight, {} };
+			for (const auto& box_str_raw : ssplit(boxes_str, '+')) {
+				string box_str { trim(box_str_raw) };
+				if (box_str.empty()) continue;
+
+				int box_weight = 1;
+				string name = box_str;
+				if (auto colon = box_str.find(':'); colon != string::npos) {
+					name = box_str.substr(0, colon);
+					string weight_str { trim(box_str.substr(colon + 1)) };
+					if (weight_str.empty() or not isint(weight_str))
+						return fail(R"(Invalid box weight in boxes_layout: ")" + box_str + '"');
+					box_weight = std::stoi(weight_str);
+					if (box_weight < 1)
+						return fail(R"(Box weight must be a positive integer in boxes_layout: ")" + box_str + '"');
+				}
+
+				if (not v_contains(Config::valid_boxes, name))
+					return fail(R"(Unknown box name in boxes_layout: ")" + name + '"');
+				if (v_contains(seen_names, name))
+					return fail("Box \"" + name + "\" appears more than once in boxes_layout!");
+				seen_names.push_back(name);
+
+				row.boxes.push_back({ name, box_weight });
+			}
+
+			if (row.boxes.empty())
+				return fail("Empty row in boxes_layout!");
+
+			rows.push_back(std::move(row));
+		}
+
+		if (rows.empty())
+			return fail("boxes_layout is empty!");
+
+		return true;
+	}
+
+	bool boxesLayoutMatches(const vector<LayoutRow>& rows, const string& shown_boxes) {
+		const auto shown = ssplit(shown_boxes);
+
+		vector<string> layout_names;
+		for (const auto& row : rows)
+			for (const auto& box : row.boxes)
+				layout_names.push_back(box.name);
+
+		if (shown.size() != layout_names.size())
+			return false;
+
+		return std::ranges::all_of(shown, [&layout_names](const auto& name) { return v_contains(layout_names, name); });
+	}
+
+	auto solveBoxesLayout(const vector<LayoutRow>& rows, int term_width, int term_height) -> std::unordered_map<string, array<int, 4>> {
+		std::unordered_map<string, array<int, 4>> result;
+		if (rows.empty() or term_width <= 0 or term_height <= 0) return result;
+
+		int total_row_weight = 0;
+		for (const auto& row : rows) total_row_weight += row.weight;
+		if (total_row_weight < 1) total_row_weight = 1;
+
+		int y = 1;
+		int height_used = 0;
+		for (size_t r = 0; r < rows.size(); ++r) {
+			const auto& row = rows[r];
+			//? The last row absorbs any rounding remainder so rows always add up to term_height exactly
+			int row_height = (r + 1 == rows.size())
+				? term_height - height_used
+				: max(1, (int)std::round((double)term_height * row.weight / total_row_weight));
+			height_used += row_height;
+
+			int total_box_weight = 0;
+			for (const auto& box : row.boxes) total_box_weight += box.weight;
+			if (total_box_weight < 1) total_box_weight = 1;
+
+			int x = 1;
+			int width_used = 0;
+			for (size_t c = 0; c < row.boxes.size(); ++c) {
+				const auto& box = row.boxes[c];
+				//? The last box in a row absorbs any rounding remainder so a row's boxes fill it exactly
+				int box_width = (c + 1 == row.boxes.size())
+					? term_width - width_used
+					: max(1, (int)std::round((double)term_width * box.weight / total_box_weight));
+				width_used += box_width;
+
+				result[box.name] = { x, y, box_width, row_height };
+				x += box_width;
+			}
+
+			y += row_height;
+		}
+
+		return result;
 	}
 }
 
