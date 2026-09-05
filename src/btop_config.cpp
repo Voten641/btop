@@ -168,6 +168,10 @@ namespace Config {
 
 		{"cpu_bottom",			"#* Show cpu box at bottom of screen instead of top."},
 
+	#ifdef GPU_SUPPORT
+		{"gpu_cpu_side_by_side", "#* Show gpu box(es) beside the cpu box instead of below it, splitting the top row horizontally."},
+	#endif
+
 		{"show_uptime", 		"#* Shows the system uptime in the CPU box."},
 
 		{"show_cpu_watts",		"#* Shows the CPU package current power consumption in watts. Requires running `make setcap` or `make setuid` or running with sudo."},
@@ -331,6 +335,9 @@ namespace Config {
 		{"cpu_invert_lower", true},
 		{"cpu_single_graph", false},
 		{"cpu_bottom", false},
+	#ifdef GPU_SUPPORT
+		{"gpu_cpu_side_by_side", false},
+	#endif
 		{"show_uptime", true},
 		{"show_cpu_watts", true},
 		{"check_temp", true},

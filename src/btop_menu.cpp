@@ -415,6 +415,16 @@ namespace Menu {
 				"",
 				"Show cpu box at bottom of screen instead",
 				"of top."},
+		#ifdef GPU_SUPPORT
+			{"gpu_cpu_side_by_side",
+				"Show gpu box(es) beside cpu box.",
+				"",
+				"Splits the top row horizontally, placing",
+				"the gpu box(es) to the right of the cpu",
+				"box instead of below it.",
+				"",
+				"True or False."},
+		#endif
 			{"graph_symbol_cpu",
 				"Graph symbol to use for graphs in cpu box.",
 				"",

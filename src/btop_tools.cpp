@@ -127,21 +127,42 @@ namespace Term {
         	for (char i = '0'; i <= '5'; i++)
         		gpu += (boxes.contains("gpu"s + i) ? 1 : 0);
 	#endif
+    #ifdef GPU_SUPPORT
+		bool side_by_side = cpu and gpu != 0 and Config::getB("gpu_cpu_side_by_side");
+	#endif
         int width = 0;
 		if (mem) width = Mem::min_width;
 		else if (net) width = Mem::min_width;
 		width += (proc ? Proc::min_width : 0);
-		if (cpu and width < Cpu::min_width) width = Cpu::min_width;
 	#ifdef GPU_SUPPORT
-		if (gpu != 0 and width < Gpu::min_width) width = Gpu::min_width;
+		if (side_by_side) {
+			//? Cpu and gpu box(es) sit next to each other, so their minimum widths add up
+			int cpu_gpu_width = Cpu::min_width + Gpu::min_width;
+			if (width < cpu_gpu_width) width = cpu_gpu_width;
+		} else {
+			if (cpu and width < Cpu::min_width) width = Cpu::min_width;
+			if (gpu != 0 and width < Gpu::min_width) width = Gpu::min_width;
+		}
+	#else
+		if (cpu and width < Cpu::min_width) width = Cpu::min_width;
 	#endif
 
 		int height = (cpu ? Cpu::min_height : 0);
 		if (proc) height += Proc::min_height;
 		else height += (mem ? Mem::min_height : 0) + (net ? Net::min_height : 0);
 	#ifdef GPU_SUPPORT
-		for (int i = 0; i < gpu; i++)
-			height += Gpu::gpu_b_height_offsets[i] + 4;
+		if (side_by_side) {
+			//? Cpu and gpu box(es) share the same row, so only the taller of the two
+			//? adds to the total height instead of stacking on top of each other
+			int gpu_col_height = 0;
+			for (int i = 0; i < gpu; i++)
+				gpu_col_height += Gpu::gpu_b_height_offsets[i] + 4;
+			if (gpu_col_height > Cpu::min_height)
+				height += gpu_col_height - Cpu::min_height;
+		} else {
+			for (int i = 0; i < gpu; i++)
+				height += Gpu::gpu_b_height_offsets[i] + 4;
+		}
 	#endif
 
 		return { width, height };

@@ -1447,6 +1447,9 @@ cpu_single_graph = false
 #* Show cpu box at bottom of screen instead of top.
 cpu_bottom = false
 
+#* Show gpu box(es) beside the cpu box instead of below it, splitting the top row horizontally.
+gpu_cpu_side_by_side = false
+
 #* Shows the system uptime in the CPU box.
 show_uptime = true
 
